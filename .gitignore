@@ -119,3 +119,6 @@ Desktop.ini
 *.swp
 *.swo
 *.lock
+
+# ignore experiment files
+**/experimental/
