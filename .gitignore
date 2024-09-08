@@ -1,0 +1,16 @@
+# Python virtual environment
+.venv/
+
+# R renv library folder
+renv/library/
+
+# RStudio project files
+.Rproj.user/
+*.Rproj
+
+# VS Code settings
+.vscode/
+
+# System-specific files
+.DS_Store
+Thumbs.db
