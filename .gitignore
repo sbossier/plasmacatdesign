@@ -87,9 +87,6 @@ renv/library/
 .Rprofile
 .vsc_r_log/
 
-# R lock files
-renv.lock
-
 # RStudio configuration
 .rsconnect/
 
