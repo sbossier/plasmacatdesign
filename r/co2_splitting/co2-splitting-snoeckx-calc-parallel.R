@@ -530,7 +530,7 @@ process_file <- function(filename) {
 }
 
 # Set working directory and list all files
-setwd(file.path("N:", "FWET", "FDCH", "AdsCatal", "General", "personal_work_folders", "plasmacatdesign", "co2-splitting", "uhasselt", "SiO2+TMAH-220-12H", "pwr-const"))
+setwd(file.path("N:", "FWET", "FDCH", "AdsCatal", "General", "personal_work_folders", "plasmacatdesign", "co2-splitting", "uhasselt", "GM11.2", "pwr-const", "test"))
 all_files <- list.files(pattern = "\\d+\\.\\ds-\\d+\\.csv")
 
 # Create a cluster (number of cores to use)
