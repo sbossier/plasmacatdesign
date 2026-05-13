@@ -31,17 +31,27 @@ process_file <- function(filename) {
     # and X_GC = 1 - c_GC,plasma / c_GC,blank
     
     # Calculate gamma
-    
     flow_co2 <- data %>%
       filter(compound == "CO2") %>%
       pull(flow_mlmin) %>%
-      unique()
+      mean()
     
     flow_n2 <- data %>%
       filter(compound == "N2") %>%
       pull(flow_mlmin) %>%
-      unique() %>%
+      mean() %>%
       ifelse(is.na(.), 0, .)
+    
+    #flow_co2 <- data %>%
+    #  filter(compound == "CO2") %>%
+    #  pull(flow_mlmin) %>%
+    #  unique()
+    
+    #flow_n2 <- data %>%
+    #  filter(compound == "N2") %>%
+    #  pull(flow_mlmin) %>%
+    #  unique() %>%
+    #  ifelse(is.na(.), 0, .)
     
     gamma     <- flow_co2 / (flow_co2 + flow_n2)
     gamma_sd  <- 0
@@ -89,7 +99,7 @@ process_file <- function(filename) {
       pull(conc_rsd) %>%
       unique()
     
-    # Calculation of incorrect conversion simply based on GC results
+    # Calculation of incorrect conversion based on GC results
     
     conv_co2_gc <- 1 - (conc_avg_co2_plasma / conc_avg_co2_blank)
     
@@ -530,7 +540,7 @@ process_file <- function(filename) {
 }
 
 # Set working directory and list all files
-setwd(file.path("N:", "FWET", "FDCH", "AdsCatal", "General", "personal_work_folders", "plasmacatdesign", "co2-splitting", "uhasselt", "GM11.2", "pwr-const", "test"))
+setwd(file.path("C:", "Users", "Sande", "Documents", "uantwerpen", "plasmacatdesign", "co2-splitting", "uhasselt", "GM11.2", "pwr-const"))
 all_files <- list.files(pattern = "\\d+\\.\\ds-\\d+\\.csv")
 
 # Create a cluster (number of cores to use)

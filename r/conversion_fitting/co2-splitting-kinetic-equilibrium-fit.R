@@ -11,27 +11,30 @@ library(ggrepel)
 library(ggthemes)
 
 # Read in starting data
-setwd("H:/data/co2-splitting/uhasselt/GM11.2")
-filename <- "gm11.2-conv-values-no-outliers.csv"
-data <- read_csv(filename, na = c("NA", "N A", "na", ""))
+setwd("C:/Users/Sande/Documents/uantwerpen/plasmacatdesign/co2-splitting/uhasselt")
+filename <- "SiO2+TMAH-220-12H-conversion-values.csv"
+data_orgininal <- read_csv(filename, na = c("NA", "N A", "na", ""))
 
 ######################################################################################
 # Fitting CO2 mole fraction to first-order reaction rate model                       #
 # obtaining equilibrium CO2 mole fraction and reaction rate constant with SD and RSD #
 ######################################################################################
 
+# filter data for CO2
+data <- data_orgininal %>% filter(compound == "CO2")
+
 # From the CO2 conversion calculated using Snoeckx's method, the mole fraction of CO2 after conversion is measured
 data    <- mutate(data, mole_fraction_co2 = (1 - conv) / (1 + 1 / 2 * conv), .after = conv_sd)
 
 nls_fit <- data %>%
                   filter(compound == "CO2") %>%
-                  nls(mole_fraction_co2 ~ mole_fraction_co2_eq - (mole_fraction_co2_eq - 1) * exp(-k * res_time), data = .,
+                  nls(mole_fraction_co2 ~ mole_fraction_co2_eq - (mole_fraction_co2_eq - 1) * exp(-k * res_time_sec), data = .,
                       start = list(mole_fraction_co2_eq = 0.5, k = 0.05),
                       control = nls.control(maxiter= 200, warnOnly=TRUE))
 
 nls_fit_conv <- data %>%
                       filter(compound == "CO2") %>%
-                      nls(conv ~ conv_eq - conv_eq * exp(-k * res_time), data = .,
+                      nls(conv ~ conv_eq - conv_eq * exp(-k * res_time_sec), data = .,
                           start = list(conv_eq = 0.50, k = 0.05),
                           control = nls.control(maxiter= 200, warnOnly=TRUE))
 
@@ -55,22 +58,11 @@ k_loss_rsd <- sqrt(k_rsd ^ 2 + (mole_fraction_co2_eq_sd / (1 - mole_fraction_co2
 k_loss_sd  <- k_loss_rsd * k_loss
 
 #######################################################
-# constructing the 95% prediction interval of the fit #
-#######################################################
-
-# data_fit_pred <- data.frame(res_time = seq(0, 100, .5))
-# pred_values <- predictNLS(nls_fit, newdata = data_fit_pred, interval = "prediction", alpha = .05, do.sim = FALSE)
-
-# data_fit_pred$mean <- pred_values$summary[,2]
-# data_fit_pred$lcl <- pred_values$summary[,5]
-# data_fit_pred$ucl <- pred_values$summary[,6]
-
-#######################################################
 # constructing the 95% confidence interval of the fit #
 #######################################################
 
 # Create dataframe to store results of the calculated confidence intervals of the nonlinear model
-nls_fit_conf <- data.frame(res_time = seq(1, 100, .5))
+nls_fit_conf <- data.frame(res_time_sec = seq(1, 100, .5))
 
 # Calculate the 95% Confidence Interval of the nonlinear model using first-/second-order Taylor expansion (Monte Carlo sim is disables (do.sim = FALSE) to shorten calculation time)
 conf_values <- predictNLS(nls_fit, newdata = nls_fit_conf, interval = "confidence", alpha = .05, do.sim = FALSE)
@@ -141,16 +133,16 @@ nls_fit_conf <- mutate(nls_fit_conf,
 ##################################
 
 # Get averaged plasma power over all residence times
-power_avg <- mean(data$plasma_power[-1], na.rm = T)
+power_avg <- mean(data$plasma_power_watt_avg[-1], na.rm = T)
 
 # Get reactor volume
-reactor_vol_ml <- data$reactor_vol_ml %>% unique()
+reactor_vol_ml <- 17.31
 
 # Get packed fraction of reactor
-packing_factor <- data$packing_factor %>% unique()
+packing_factor <- 0.4774
 
 # Get idealized blank CO2 concentration (normally 1, unless dilutant is added)
-conc_co2_blank <- data %>% filter(compound == "CO2") %>% pull(mole_fraction_i) %>% unique()
+conc_co2_blank <- 1
 
 # Plasma temperature (K)
 
@@ -165,7 +157,7 @@ gf_co <- -1.48747E-20*(gas_temp ^ 6) + 2.90543E-16* (gas_temp ^ 5) - 2.18412E-12
 
 gf_co2 <- 1.21850E-21* (gas_temp ^ 6) - 2.63973E-17 * (gas_temp ^ 5) + 2.25893E-13 * (gas_temp ^ 4) - 9.56091E-10 * (gas_temp ^ 3) + 2.75906E-06 * (gas_temp ^ 2) - 4.68102E-03 * gas_temp - 3.93205E+02
 
-nls_fit_conf <- nls_fit_conf %>% mutate(co2_flux_fit    = (reactor_vol_ml * (1 - packing_factor)) / (res_time / 60),
+nls_fit_conf <- nls_fit_conf %>% mutate(co2_flux_fit    = (reactor_vol_ml * (1 - packing_factor)) / (res_time_sec / 60),
                                         
                                         alpha_fit       = 1 + (1 / 2) * conv_fit,
                                          
@@ -205,74 +197,62 @@ nls_fit_conf <- nls_fit_conf %>% mutate(co2_flux_fit    = (reactor_vol_ml * (1 -
 # Write fitting data to .csv-file #
 ###################################
 
-write_csv(nls_fit_conf, gsub(".csv", "-fitting.csv", filename))
+nls_fit_conf$packing <- data$packing %>% unique()
 
-#####################
-# Plotting the data #
-#####################
+co2_data <- nls_fit_conf %>% 
+  mutate(
+    packing,
+    compound = "CO2",
+    res_time_sec,
+    conc_fit = mole_fraction_co2_fit,
+    conc_fit_sd = mole_fraction_co2_fit_sd,
+    conc_fit_rsd = mole_fraction_co2_fit_rsd,
+    conc_fit_lcl = mole_fraction_co2_fit_lcl,
+    conc_fit_ucl = mole_fraction_co2_fit_ucl,
+    k, k_sd, k_rsd, f_k_form, f_k_form_sd, f_k_form_rsd, k_loss, k_loss_sd, k_loss_rsd,
+    conv_eq, conv_eq_sd, conv_eq_rsd, conv_fit, conv_fit_sd, conv_fit_rsd, conv_fit_lcl, conv_fit_ucl,
+    sei_fit, ee_gf_fit, ee_gf_fit_sd, ee_gf_fit_lcl, ee_gf_fit_ucl,
+    .keep = "none"
+  )
 
-# Create plot of fitted and measured CO2 conversion with 95% confidence interval for the standard deviation on the mean for the measured CO2 conversion
-data %>% filter(compound == "CO2") %>%
-  ggplot(aes(x = res_time,
-             y = conv*100)) +
-  geom_line(data = nls_fit_conf, aes(x = res_time, y = conv_fit*100), color = "grey", linewidth = 1.5) +
-  geom_ribbon(data = nls_fit_conf,
-              aes(x = res_time, y = conv_fit*100, ymin = conv_fit_lcl*100, ymax = conv_fit_ucl*100), 
-              color= "grey", alpha = .25, size = 1.25) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = 100 *  (conv - qt(.975, df = df)*conv_sd/sqrt(df+1)), ymax = 100 * (conv + qt(.975, df = df)*conv_sd/sqrt(df+1))), width=1, position=position_dodge(0.05), size = 1) +
-  scale_x_continuous(limits = c(0, 100),expand = expansion(mult = c(0.01, .01))) + 
-  scale_y_continuous(limits = c(0, 40),expand = expansion(mult = c(0.01, 0.01))) +
-  ggtitle("CO2 conversion vs. residence time") +
-  xlab("Residence time (s)") +
-  ylab("CO2 conversion (%)") +
-  theme_solarized()
 
-# Create plot of fitted and measured energy efficiency with 95% confidence interval for the standard deviation on the mean for the measured energy efficiency
-data %>% filter(compound == "CO2") %>%
-  ggplot(aes(res_time, ee_gf)) +
-  geom_line(data = nls_fit_conf, aes(x = res_time, y = ee_gf_fit), color = "grey", linewidth = 1.5) +
-  geom_ribbon(data = nls_fit_conf, 
-              aes(x = res_time, y = ee_gf_fit, ymin = ee_gf_fit_lcl, ymax = ee_gf_fit_ucl), 
-              color= "grey", alpha = .25, size = 1.25) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = ee_gf - qt(.975, df = df) * ee_gf_sd/sqrt(df+1), ymax = ee_gf + qt(.975, df = df) * ee_gf_sd/sqrt(df+1)), width=1, position=position_dodge(0.05), size = 1) +
-  scale_x_continuous(limits = c(0,100),expand = expansion(mult = c(0.01, .01))) + 
-  scale_y_continuous(limits = c(0,7),expand = expansion(mult = c(0.01, 0.01))) +
-  ggtitle("Energy efficiency vs. residence time") +
-  xlab("Residence time (s)") +
-  ylab("Energy efficiency (%)") +
-  theme_solarized()
+# 2. CO: use the CO-specific concentration columns
+co_data <- nls_fit_conf %>% 
+  mutate(
+    packing,
+    compound = "CO",
+    res_time_sec,
+    conc_fit     = conc_co_fit,
+    conc_fit_sd  = conc_co_fit_sd,
+    conc_fit_rsd = conc_co_fit_sd / conc_co_fit,
+    conc_fit_lcl = conc_co_fit_lcl,
+    conc_fit_ucl = conc_co_fit_ucl,
+    k, k_sd, k_rsd, f_k_form, f_k_form_sd, f_k_form_rsd, k_loss, k_loss_sd, k_loss_rsd,
+    sei_fit, ee_gf_fit, ee_gf_fit_sd, ee_gf_fit_lcl, ee_gf_fit_ucl,
+    conv_eq = NA, conv_eq_sd = NA, conv_eq_rsd = NA,
+    conv_fit = NA, conv_fit_sd = NA, conv_fit_rsd = NA, conv_fit_lcl = NA, conv_fit_ucl = NA,
+    .keep = "none"
+  )
 
-# Create plot of fitted and measured CO concentration with 95% confidence interval for the standard deviation on the mean for the measured CO concentration
-data %>% filter(compound == "CO") %>%
-  ggplot(aes(res_time, 100*yield)) +
-  geom_line(data = nls_fit_conf, aes(x = res_time, y = 100 * conc_co_fit), color = "grey", linewidth = 1.5) +
-  geom_ribbon(data = nls_fit_conf, 
-              aes(x = res_time, y = conc_co_fit, ymin = 100 * conc_co_fit_lcl, ymax = 100 * conc_co_fit_ucl), 
-              color= "grey", alpha = .25, size = 1.25) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = 100 * (yield - qt(.975, df = df) * yield_sd/sqrt(df+1)), ymax = 100 * (yield + qt(.975, df = df) * yield_sd/sqrt(df+1))), width=1, position=position_dodge(0.05), size = 1) +
-  scale_x_continuous(limits = c(0,100),expand = expansion(mult = c(0.01, .01))) + 
-  scale_y_continuous(limits = c(0,30),expand = expansion(mult = c(0.01, 0.01))) +
-  ggtitle("CO yield vs. residence time") +
-  xlab("Residence time (s)") +
-  ylab("CO yield (%)") +
-  theme_solarized()
+# 3. O2: use the O2-specific concentration columns
+o2_data <- nls_fit_conf %>% 
+  mutate(
+    packing,
+    compound = "O2",
+    res_time_sec,
+    conc_fit     = conc_o2_fit,
+    conc_fit_sd  = conc_o2_fit_sd,
+    conc_fit_rsd = conc_o2_fit_sd / conc_o2_fit,
+    conc_fit_lcl = conc_o2_fit_lcl,
+    conc_fit_ucl = conc_o2_fit_ucl,
+    k, k_sd, k_rsd, f_k_form, f_k_form_sd, f_k_form_rsd, k_loss, k_loss_sd, k_loss_rsd,
+    sei_fit, ee_gf_fit, ee_gf_fit_sd, ee_gf_fit_lcl, ee_gf_fit_ucl,
+    conv_eq = NA, conv_eq_sd = NA, conv_eq_rsd = NA,
+    conv_fit = NA, conv_fit_sd = NA, conv_fit_rsd = NA, conv_fit_lcl = NA, conv_fit_ucl = NA,
+    .keep = "none"
+  )
 
-# Create plot of fitted and measured O2 concentration with 95% confidence interval for the standard deviation on the mean for the measured O2 concentration
-data %>% filter(compound == "O2") %>%
-  ggplot(aes(res_time, yield*100)) +
-  geom_line(data = nls_fit_conf, aes(x = res_time, y = 100 * conc_o2_fit), color = "grey", size = 1.5) +
-  geom_ribbon(data = nls_fit_conf, 
-              aes(x = res_time, y = conc_o2_fit, ymin = 100 * (conc_o2_fit - qt(.975, df = nrow(data)-2) * conc_o2_fit_sd), ymax = 100 * (conc_o2_fit + qt(.975, df = nrow(data)-2) * conc_o2_fit_sd)), 
-              color= "grey", alpha = .25, size = 1.25) +
-  geom_point(size = 2) +
-  geom_errorbar(aes(ymin = 100 * (yield - qt(.975, df = df) * yield_sd / sqrt(df + 1)), ymax = 100 * (yield + qt(.975, df = df) * yield_sd/sqrt(df+1))), width=1, position=position_dodge(0.05), size = 1) +
-  scale_x_continuous(limits = c(0,100),expand = expansion(mult = c(0.01, .01))) + 
-  scale_y_continuous(limits = c(0,17),expand = expansion(mult = c(0.01, 0.01))) +
-  ggtitle("O2 yield vs. residence time") +
-  xlab("Residence time (s)") +
-  ylab("O2 yield (%)") +
-  theme_solarized()
+# Combine the three data frames into one
+combined_data <- bind_rows(co2_data, co_data, o2_data)
 
+write_csv(combined_data, gsub(".csv", "-fitting.csv", filename))
