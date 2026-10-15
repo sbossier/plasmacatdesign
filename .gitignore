@@ -122,3 +122,7 @@ Desktop.ini
 
 # ignore experiment files
 **/experimental/
+# Local data and literature (not tracked)
+test-files/
+file/
+literature/
