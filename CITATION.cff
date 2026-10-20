@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "plasmacatdesign: electrical analysis of packed-bed coaxial DBD plasma reactors"
+authors:
+  - family-names: Bossier
+    given-names: Sander
+    affiliation: University of Antwerp
+    # TODO: add ORCID, e.g. orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/sbossier/plasmacatdesign"
+license: MIT
+# TODO: add a version and a DOI (e.g. from a Zenodo release) before the first public release
+keywords:
+  - dielectric barrier discharge
+  - packed-bed reactor
+  - plasma catalysis
+  - Lissajous figure
+  - charge-voltage diagram
+  - equivalent circuit

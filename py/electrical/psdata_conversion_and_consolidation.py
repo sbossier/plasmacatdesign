@@ -26,13 +26,18 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Starting from the old system, I will try to simplify the workflow.
-    The goal of this script is to create a single file with all the data from the raw lissajous measurements starting from the .psdata files.
-    The script will be written in python and will use the pandas library to create a dataframe with all the data.
-    The script will take a file path as input, but that file path has to be structured very specifically.
-    The order of the folders in the file path is important, because the script will use the folder names to create the dataframe. This process uses indexing of the file path, so the order of the folders is important. It is a rudimentary way of creating a database, but it works.
-    The file path should be structured as follows:
-    ...\personal_work_folders\project_name\reaction_type\packing_material_supplier\packing_material_name\wattage_constant\lissajous\xy.zs-ab-plasma
+    # PicoScope conversion and consolidation
+
+    This notebook turns raw PicoScope captures (`.psdata`) into one table per reactor run, `lissajous_data.parquet`. That table holds time, charge, voltage, reactor current and source current in SI units, plus the experiment description read from the folder names. It is the input of `lissajous_calculations.py`.
+
+    **Requirements:** PicoScope 6 on Windows. Set `picoscope_exe`, and set `picoscope_view`: the name of the scope view depends on the language of PicoScope ("Scope 1" in English, "Scoop 1" in Dutch).
+
+    **How to use:** set `top_dir` and `parent_dir_project` in the configuration cell, then press **Convert**.
+
+    Documentation: [calculation steps, part A](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/03-calculation-steps.md#part-a-from-oscilloscope-files-to-one-data-table) · [folder layout, units and channel order](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/07-adapting-to-your-reactor.md#folder-layout)
+
+    **Folder layout.** The experiment description is read from the position of each folder in the path, so the order of the folders matters:
+    `<parent_dir_project>\project_name\reaction_type\packing_material_supplier\packing_material_name\wattage_constant\lissajous\xy.zs-ab-plasma\<YYYYMMDD-NNNN>.psdata`
     with:
     - project_name: the name of the project
     - reaction_type: the type of reaction (e.g. drm, co2-splitting, etc.)
@@ -62,17 +67,20 @@ def _():
 
 
 @app.cell
-def _():
-    # Specify the top folder
-    top_dir = r'C:\Users\Sande\OneDrive - Universiteit Antwerpen\plasmacatdesign\co2-splitting\uhasselt\SiO2_Type_S_1.6-1.8_mm\pwr-const\lissajous'
+def _(mo, os):
+    # Folder to convert (all subfolders are searched); default:
+    # example-data/ in the repository root. Replace with your own path
+    top_dir = os.path.normpath(
+        os.path.join(str(mo.notebook_dir()), '..', '..', 'example-data')
+    )
 
     picoscope_exe = r"C:\Program Files (x86)\Pico Technology\PicoScope6\PicoScope.exe"
 
     # View name depends on the PicoScope language ('Scope 1' in English)
     picoscope_view = 'Scoop 1'
 
-    # Folder directly above project_name in the file path
-    parent_dir_project = 'OneDrive - Universiteit Antwerpen'
+    # Name of the folder directly above project_name in the file path
+    parent_dir_project = 'example-data'
     return parent_dir_project, picoscope_exe, picoscope_view, top_dir
 
 
@@ -127,7 +135,7 @@ def convert_to_si(value, unit):
 @app.cell
 def _(os, pd, re):
     # Define a function to return measurement information
-    def parse_file_path(file_path, parent_dir_project='OneDrive - Universiteit Antwerpen'):
+    def parse_file_path(file_path, parent_dir_project='example-data'):
         # Split the file path into parts
         parts = file_path.split(os.sep)
 

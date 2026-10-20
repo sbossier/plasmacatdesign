@@ -28,96 +28,52 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Use this after running the script `psdata_conversion_and_consolidation.ipynb`
+    # Lissajous (charge–voltage) calculations
+
+    This notebook turns the oscilloscope data of a DBD plasma reactor into numbers you can report: plasma power, the capacitances of the reactor, how much of the packed bed discharges, the voltage across the gas, the charge carried by the plasma, and indicators of current pulses.
+
+    **Input:** `lissajous_data.parquet` files made by `psdata_conversion_and_consolidation.py`. One per reactor-run folder.
+    **Output, written next to each input file:**
+    - `lissajous_calculations.parquet`: one row per AC cycle;
+    - the same with gross failures removed, plus an average per capture (`.csv`);
+    - `lissajous_figure.png`;
+    - `profile_data.parquet`.
+
+    **How to use:** set `top_folder` in the configuration cell below (default: `example-data/` in the repository root) and press **Run calculations**.
+
+    **Documentation** (written for chemists, no physics background assumed):
+    [what we measure](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/01-what-we-measure.md) ·
+    [equivalent circuits](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/02-equivalent-circuits.md) ·
+    [calculation steps](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/03-calculation-steps.md) ·
+    [output columns](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/04-output-columns.md) ·
+    [known limitations](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/05-known-limitations.md) ·
+    [experimental guide](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/06-experimental-guide.md) ·
+    [adapting to your reactor](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/07-adapting-to-your-reactor.md) ·
+    [references](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/08-references.md)
     """)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""
-    ## Critical assessment of the calculation (October 2026)
+    mo.callout(mo.md(r"""
+    **Before you report numbers, read the [known limitations](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/05-known-limitations.md).**
 
-    References: **P15** = Peeters & van de Sanden 2015, *Plasma Sources Sci. Technol.* 24 015016; **PB19** = Peeters & Butterworth 2019, *Electrical Diagnostics of DBDs* (IntechOpen). Numbers are from the 30 `test-files` folders (SiO2+TMAH-220-03H ×14, GM10.4/11.2/13.3 ×4, Glass_Beads_HT ×12), each run with both slope methods.
-
-    ### Changed in this version: slope windows (`slope_method='iq'`)
-    1. **Old windows were arbitrary and biased C_cell.**
-       - Old plasma-off window: `U >= U_max/5`. Old plasma-on window: the sign of Q.
-       - The plasma-off branch is curved: dQ/dV rises from ~0 at the V extremum to ~30 pF at ignition. A straight-line fit therefore depends on where the window starts. On SiO2+TMAH 10.0 s, C_cell = 24.5 / 27.3 / 28.8 / 29.7 pF for starts at 1.0 / 0.8 / 0.6 / 0.4·V_ext.
-       - The old method gave C_cell ≈ 19–29 pF (cycle CV up to 17%). The new fit gives 27.6–35.1 pF (cycle CV 0.4–3.6%).
-       - **Day dependence:** SiO2+TMAH folders with a fitted shift of 0.5–1.8 µs give C_cell = 33–34 pF (`iq`) and 26.5–28.7 pF (legacy). Folders with 8–9.5 µs give 29.3–31.5 pF and 20–21.7 pF. The new fit moves ~12% between these groups, legacy ~31%. This is consistent with probe tuning that differs between measurement days, so cross-day comparisons carry this error.
-       - **Known bias, checked only for the GM materials** (the only ones with no-plasma recordings; not verified for SiO2+TMAH or Glass_Beads_HT). Neither plasma-on estimate matches the no-plasma Q–V data, which is the reference value (PB19 §3.3).
-         - GM13.3, same day: no-plasma 22.0–23.6 pF, `iq` 27.6 pF (+20%), legacy 19.4 pF (−15%).
-         - GM10.4, same day: no-plasma 29.8 pF, `iq` 35.1 pF (+18%), legacy 23.5 pF (−21%).
-         - GM11.2, no-plasma from a different date: no-plasma 21.0–22.0 pF, `iq` 28.5 pF, legacy 21.1 pF.
-         - Cause on the `iq` side: during plasma the plasma-off branch is steeper than the true C_cell, due to residual or surface charge and weak discharges below the pulse-detection threshold (PB19 §3.3).
-         - Cause on the legacy side: it is low because its window includes the rounded corner after the V extremum.
-         - `iq` is reproducible (cycle CV ≤ 3.6%, window-insensitive) but biased about +20% for the GM materials. Treat absolute C_cell, and everything derived from it, accordingly. Relative comparisons between materials are more robust than absolute values.
-    2. **New windows** come from microdischarge activity (high-pass filtered reactor current), which does not depend on Q, C_cell or the time shift.
-       - Pulses stop at the V extremum and restart at the ignition point B (−2.5 to −4.6 kV and +2.3 to +3.3 kV on SiO2+TMAH).
-       - The ignition voltage is now an output: `U_ignition_*`.
-    3. **Plasma-off fit:** `Q = C_cell·V + b·dV/dt + c`.
-       - The quadrature term absorbs the lag of Q behind V. C_cell then changes by ≤ 2–4% with the window start, against ~20% for a straight-line fit.
-       - `delay_eff_off_*_s = −b/C_cell` is that lag: 20–31 µs on top of the applied shift (10 µs for Glass_Beads_HT 17.5 s, where the shift itself is wrong). It is a diagnostic, not a correction.
-    4. **Plasma-on fits:**
-       - `C_diel_eff_*` (ζ_diel) is the linear slope after removing the same `b·dV/dt`.
-       - `C_diel_eff_max_*` (ζ_max) is the steepest local slope. PB19 §3.2 recommends ζ_max for almond-shaped Q–V plots, which are typical of packed beds.
-       - ζ_diel ≈ 85–110 pF and ζ_max ≈ 105–158 pF (legacy ζ: 110–139 pF), both below the geometric C_diel = 204 pF. That is expected for partial discharging (PB19 §3.1, P15).
-    5. **Validity gate** (`parallelogram_valid`):
-       - It requires a relative off-fit residual ≤ 0.008 and a window sensitivity of C_cell ≤ 10%.
-       - If a cycle fails, all slope-derived outputs are NaN: C_cell, ζ, α, β, U_burning, U_breakdown, ΔQ_dis, plasma current and microdischarges.
-       - Power, U_pp and the RMS reactor/source currents are always computed.
-       - Folder median residuals: SiO2+TMAH and GM 0.0026–0.0068, Glass_Beads_HT 0.0094–0.024.
-       - Valid cycles: SiO2+TMAH 583/620, GM 204/205, Glass_Beads_HT 5/258.
-       - The threshold is empirical. Per cycle the materials overlap (SiO2+TMAH maximum 0.0108), so judge validity per folder by the fraction of valid cycles, not per cycle.
-    6. **Glass_Beads_HT is elliptical:** dQ/dV rises monotonically and has no straight segment, so the parallelogram model does not apply (PB19 §3.3). Only the power is model-free for these runs.
-       - **PB19 §3.3:** truly elliptical Q–V needs conductivity that survives the plasma-off phase, which is only expected well below 1 bar.
-       - At atmospheric pressure PB19 gives two explanations: (a) an unstable discharge averaged over many cycles, or (b) a measurement-setup error (parasitic C or L, probe delay). A milder form is an apparent rise of the plasma-off slope with power, caused by sheaths around a weak residual plasma; this fits the +20% C_cell bias in the GM data.
-       - **Here:** the figures are elliptical within single cycles, which argues against (a). The data is from 2022, when the probe was probably detuned, and the effective lag (~28 µs) is larger than for SiO2+TMAH (~19 µs); both point to (b).
-       - **But** mean(U·I) = 30 W comes from the Rogowski coil, independent of Q, while almost no microdischarge pulses are detected. So real dissipation without detectable pulses is possible as well: a diffuse discharge, microdischarges below the detection threshold, or losses in the packing.
-       - Only a no-plasma Q–V of this material on a correctly tuned probe can separate these (the PB19 test).
-    7. `slope_method='legacy'` reproduces the old windows for comparison.
-    8. **`remove_outliers` now removes gross failures, not a fixed fraction.**
-       - **Old:** EllipticEnvelope with `contamination=0.25` labelled exactly 25% of the cycles in every folder as outliers, by construction.
-       - **Why not a statistical test:** cycles within a psdata file scatter by only ~1% (core quantities, 99th percentile 0.4–8%). A χ² test (MinCovDet) and within-file z-scores therefore still flagged 20–30% of cycles: tight scatter, file-to-file drift and heavy-tailed microdischarge columns, not bad cycles.
-       - **New rule:** a cycle is removed if
-         - a core quantity deviates more than 20% from the median of its own file (`max_cycle_deviation`, catches calculation glitches), or
-         - its power deviates more than 10% from the folder median (`max_power_deviation`, catches measurements off the 30 W setpoint).
-       - Microdischarge counts and charges are excluded (they are heavy-tailed by nature: summarise them with medians). NaN never triggers removal.
-       - **Test data:** 0 glitches. Off power: Glass_Beads_HT 17.5 s loses 6 cycles (files at 25–27.5 W), SiO2+TMAH 55.0 s-02 loses 4.
-    9. **`U_breakdown_*` is now the discharge voltage U_D = V_min·(1 − C_cell/C_diel)**, with V_min = |V_ext − U_ignition|/2 (Brandenburg et al. 2023 eq. 9; De Meyer et al. 2025).
-       - **Old formula:** `ΔU/(1 + C_gas/C_diel)` had two problems:
-         - It used ΔU where the formula needs V_min.
-         - It used the empty-reactor gas capacitance C_gas (7.4 pF), where the formula needs the packed-gap capacitance C_gap. Butterworth & Allen 2017: 1/C_cell = 1/C_diel + 1/C_gas + 1/C_packing, with C_gas and C_packing together forming C_gap.
-       - **Why the new formula:** it uses the measured C_cell, so the packing is included and C_gas is no longer needed (`C_gas_F` was removed). It is also independent of ζ_diel and therefore of partial discharging.
-       - **Limitations:**
-         - It inherits the C_cell bias, but weakly: about −3% in U_D per +20% in C_cell.
-         - It is NaN for `slope_method='legacy'`, which has no ignition point.
-       - **Related quantities:**
-         - `U_burning_*` remains the Peeters (P15) burning voltage from ΔU. U_D and U_b describe the same quantity via different routes; their difference shows how far the plot departs from the ideal parallelogram.
-         - `U_ignition_*` is the applied voltage at the first microdischarge.
-    10. **Probe polarity** is now detected physically, with V as the reference (`align_polarity`):
-        - The checks are corr(V, Q) > 0, corr(I_reactor, dQ/dt) > 0 and mean(V·I_source) > 0. Flips are recorded in `flipped_Q`, `flipped_I` and `flipped_Is`.
-        - **Why:** the old rule used the sign of the first sample, which depends on the trigger phase. It failed in Glass_Beads_HT 17.5 s, 32.5 s-01 and 62.5 s-01: mean(U·I) = −30 W, the shift optimiser ran into its 33 µs bound, and power read 3–5 W instead of 30 W in the affected files.
-        - In all test files with a wrong sign, only the Rogowski current was inverted. V, Q and the source current were always mutually consistent.
-        - An inverted V cannot be distinguished from Q, I and I_source all inverted; that case flips all three, which swaps the pos/neg labels.
-        - The corrected currents are now also written back to `data_df`. Before, `profile_calculation` used the uncorrected reactor current.
-
-    ### Documented, not changed
-    1. **Charge time shift (U·I matching): a justified correction for a probe that was detuned for a long period.**
-       - **No-plasma GM11.2/GM13.3 (May 2024):** I−V phase is 89.2–89.7° and mean(U·I) ≤ 0.06 W, so the reactor is practically lossless. Q nevertheless lags V by 13.7–14.3° (12.8–13.1 µs), constant over 4–12 kVpp: a Q-channel artefact.
-       - **No-plasma GM10.4 (June 2024):** I and Q are both off by an extra ~13° (a V-channel or setup change).
-       - **Unexplained:** for the same day, U·I matching gives 8.3–9.0 µs for GM13.3, while the no-plasma zero-area shift is 12.8 µs. Power, C_cell, U_D, U_b and ΔQ_dis all depend on the shift.
-       - Recommendation for future measurements: re-tune the probe compensation and record a no-plasma Q–V at the start of each measurement day.
-    2. **C_diel = 204 pF (geometric)** implies alumina εr ≈ 10.1; εr = 9.3–10 gives 176–193 pF. Report this 5–15% uncertainty: it propagates into α, β, U_b, U_D and ΔQ_dis (P15 eqs. 7, 8, 13, 16).
-    """)
+    1. **Plasma power** (`power_plasma_W`) is the most robust result.
+    2. **Capacitances, `beta`, `U_breakdown` and `Q_delta_dis`** depend on an equivalent-circuit model that was not made for packed beds. Use them to compare materials measured the same way; their absolute values are uncertain. Prefer `U_breakdown` over `U_burning`.
+    3. A **lag term** in the plasma-off fit carries about a third of the power and of the transferred charge in our data, and its origin is unresolved. Check `power_quadrature_W`.
+    4. **Current-pulse metrics** are indicative only: with a 10 ns Rogowski coil they depend on the detection settings.
+    5. Runs with **elliptical** Q–V figures (few cycles with `parallelogram_valid == 1`) give power only.
+    """), kind="warn")
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 0: load libraries and specify the data file path
+    ## Step 0 · Libraries and settings
+
+    `top_folder` is the folder to process: every subfolder that contains a `lissajous_data.parquet` is calculated. The other settings (frequency, dielectric capacitance, detection limits) are arguments of `calculate_results` and are explained in [adapting to your reactor](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/07-adapting-to-your-reactor.md).
     """)
     return
 
@@ -152,9 +108,12 @@ def _():
 
 
 @app.cell
-def _():
-    # Specify the top folder
-    top_folder = r'C:\Users\Sande\OneDrive - Universiteit Antwerpen\plasmacatdesign\co2-splitting\uhasselt\SiO2_Type_S_1.6-1.8_mm\pwr-const\lissajous'
+def _(mo, os):
+    # Folder to process; default: example-data/ in the repository root.
+    # Replace with your own path, e.g. r'D:\data\my_project'
+    top_folder = os.path.normpath(
+        os.path.join(str(mo.notebook_dir()), '..', '..', 'example-data')
+    )
 
     # Column names for the result .csv file
     column_names_new = [
@@ -230,7 +189,14 @@ def _():
         'n_off_points_pos',
         'n_on_points_neg',
         'n_on_points_pos',
-        'calculated_shift_s'
+        'calculated_shift_s',
+        'power_quadrature_W',
+        'power_ratio_UbQdis',
+        'power_manley_W',
+        'current_noise_sigma_A',
+        'pulse_band_rms_A',
+        'pulse_width_median_s',
+        'n_pulses_too_wide'
     ]
     return column_names_new, top_folder
 
@@ -276,11 +242,11 @@ def _(lissajous_area, np):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    To maintain a better overview, let us define multiple functions each responsible of a specific task:
-    - `calculate_results` calculates the results for the given DataFrame and returns a new DataFrame with the results and writes those results to a .parquet file
-    - `remove_outliers` removes outliers from the generated DatFrame in the previous step and writes those results to a second .parquet file
-    - `lissajous_generation` generates a Lissajous figure from the given DataFrame by averaging
-    - `current_voltage_profile` generates a .parquet file with the current and voltage profile of the given DataFrame but reduced in size
+    The calculation is split into functions, each responsible for one task:
+    - `calculate_results` (step 1): all per-cycle results
+    - `remove_outliers` (step 2): removes cycles with gross failures
+    - `lissajous_figure_generation` (step 3): the average Q–V figure
+    - `profile_calculation` (step 4): down-sampled time traces with plasma current and gap voltage
     """)
     return
 
@@ -288,9 +254,16 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 1: `calculate_results`
+    ## Step 1 · `calculate_results`: everything per AC cycle
 
-    Define calculate_results function that calculates the results for the given DataFrame and returns a new DataFrame with the results
+    Per oscilloscope capture this step:
+    1. checks the probe signs and keeps whole periods only;
+    2. removes offsets and corrects the time delay of the charge probe;
+    3. finds where the plasma is active from the current pulses;
+    4. fits the slopes of the Q–V figure;
+    5. derives power, capacitances, partial discharging, the gas voltages, the transferred charge, the plasma current and current-pulse metrics.
+
+    Each sub-step, its formula and its reference: [calculation steps, part B](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/03-calculation-steps.md#part-b-from-the-data-table-to-results).
     """)
     return
 
@@ -365,11 +338,12 @@ def _(np, peak_widths):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Slope windows and fits (`slope_method='iq'`), replacing the `U >= U_max/5` and `Q` sign windows:
-    - plasma-off window: from the end of microdischarge activity at a V extremum to the first microdischarge (point B), detected on the high-pass filtered reactor current, independent of Q, C_cell and the time shift
-    - plasma-off fit: `Q = C_cell * V + b * dV/dt + c`; the quadrature term absorbs the lag of Q behind V that curves this branch
-    - plasma-on window: B to the next V extremum; `C_diel_eff` is the linear slope after removing the same `b * dV/dt`, `C_diel_eff_max` the steepest local slope (zeta_max, Peeters & Butterworth 2019 section 3.2)
-    - validity gate: relative fit residual and window sensitivity of C_cell; if either fails, slope-derived outputs are NaN
+    **Slope fits per half-period** (`slope_method='iq'`):
+    - *Plasma off* runs from the end of pulse activity at a voltage extremum to the first new pulse (point B, ignition). Activity is found in the high-pass filtered reactor current, independent of the charge, the capacitances and the time shift.
+    - *Plasma-off fit*: `Q = C_cell·V + b·dV/dt + c`. The `b` term absorbs a lag of Q behind V. It is a model element the later steps do not use: see [known limitations](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/05-known-limitations.md#the-lag-term-in-the-plasma-off-fit).
+    - *Plasma on* runs from B to the next extremum. `C_diel_eff` is the straight-line slope; `C_diel_eff_max` is the steepest local slope (Peeters & Butterworth 2019 §3.2).
+    - *Validity check*: when the fit residual or the window sensitivity of `C_cell` is too large, all slope-based outputs of the cycle are left empty (NaN).
+    `slope_method='legacy'` reproduces the old windows for comparison.
     """)
     return
 
@@ -453,14 +427,19 @@ def _(butter, np, sosfiltfilt, uniform_filter1d):
         density : np.ndarray
             Fraction of active blocks in a moving window of smooth_s,
             one value per block
+        noise_sigma : float
+            Robust standard deviation (1.4826 MAD) of I_hp in the inactive
+            blocks, the noise floor for pulse detection
         """
         sos = butter(4, hp_cutoff_Hz, 'hp', fs=1 / dt, output='sos')
         I_hp = sosfiltfilt(sos, I)
         n = len(I_hp) // decimate * decimate
         envelope = np.abs(I_hp[:n]).reshape(-1, decimate).max(axis=1)
         active = envelope > k_med * np.median(envelope)
+        quiet = I_hp[:n].reshape(-1, decimate)[~active].ravel()
+        noise_sigma = 1.4826 * np.median(np.abs(quiet - np.median(quiet)))
         window = max(1, int(round(smooth_s / (dt * decimate))))
-        return uniform_filter1d(active.astype(float), window)
+        return uniform_filter1d(active.astype(float), window), noise_sigma
 
 
     def fit_iq(V, dVdt, Q):
@@ -655,6 +634,8 @@ def _(
             ac_freq_Hz=3000,
             C_diel_F=204e-12,
             discharge_threshold_A=7.5e-3,
+            max_pulse_width_s=1e-6,
+            pulse_band_Hz=(0.2e6, 10e6),
             t='time_s',
             Q='charge_C',
             U='voltage_V',
@@ -665,7 +646,8 @@ def _(
             slope_dt_s=0.32e-6,
             slope_smoothing_s=32e-6,
             max_resid_rel=0.008,
-            max_window_sens=0.10
+            max_window_sens=0.10,
+            de_seed=0
     ):
         # Extract some variables from the data
         project_name = data_df['project_name'].iloc[0]
@@ -719,7 +701,12 @@ def _(
             full_cycle_time = num_cycles * ac_period_s
 
             # Select the full cycles
-            data = data[data[t] < data[t].iloc[0] + full_cycle_time]
+            data = data[data[t] < data[t].iloc[0] + full_cycle_time].copy()
+
+            # Remove the offsets of charge and voltage over the full cycles
+            # (P15 section 4.1: Q and V average to zero over a period)
+            data[Q] = data[Q] - data[Q].mean()
+            data[U] = data[U] - data[U].mean()
 
             # Calculate plasma power using the product of U and I
             power_plasma_UIprod_W = np.mean(data[U] * data[Ir])
@@ -740,7 +727,8 @@ def _(
                 popsize=15,
                 tol=1e-6,
                 mutation=(0.5, 1.0),
-                recombination=0.7
+                recombination=0.7,
+                rng=de_seed
             )
 
             # Extract the optimized shift value
@@ -783,19 +771,22 @@ def _(
             # corrected time, shifted charge, and smoothed values
             data_df.loc[data.index, t] = data[t]
             data_df.loc[data.index, Q] = data[Q]
+            data_df.loc[data.index, U] = data[U]
             data_df.loc[data.index, Ir] = data[Ir]
             data_df.loc[data.index, Is] = data[Is]
             data_df.loc[data.index, 'dV_dt'] = data['dV_dt']
             data_df.loc[data.index, 'dQ_dV'] = data['dQ_dV']
 
-            # Segment half-cycles on microdischarge activity and fit the slopes
+            # Microdischarge activity and noise floor of the reactor current
             # (decimated: the fits need ~1000 points per half-cycle, not 10^5)
+            decimate = max(1, int(round(slope_dt_s / t_per_row)))
+            density, noise_sigma_A = discharge_activity(
+                data[Ir].to_numpy(), t_per_row, decimate
+            )
+
+            # Segment half-cycles on microdischarge activity and fit the slopes
             if slope_method == 'iq':
-                decimate = max(1, int(round(slope_dt_s / t_per_row)))
                 dt_dec = t_per_row * decimate
-                density = discharge_activity(
-                    data[Ir].to_numpy(), t_per_row, decimate
-                )
                 n_dec = len(density) * decimate
                 t_dec = data[t].to_numpy()[:n_dec:decimate]
                 V_dec = data[U].to_numpy()[:n_dec:decimate]
@@ -1024,6 +1015,28 @@ def _(
                     # Calculate the RMS current in the source
                     current_rms_source_A = np.sqrt(np.mean(np.square(subset[Is])))
 
+                    # Self-consistency diagnostics
+                    # Power in the quadrature term b dV/dt of the plasma-off fit
+                    # (b = -C_cell delay_eff_off), i.e. a parallel loss element
+                    V_amp_V = U_pp_V / 2
+                    omega = 2 * np.pi * ac_freq_Hz
+                    power_quadrature_W = np.mean([
+                        h['C_cell_F'] * h['delay_eff_off_s'] for h in (neg, pos)
+                    ]) * omega**2 * V_amp_V**2 / 2
+
+                    # P15 eq. 14: W = 2 U_b Q_dis, ratio 1 for a parallelogram
+                    power_ratio_UbQdis = (
+                        2 * U_burning_avg_V * Q_delta_dis_avg_C * ac_freq_Hz
+                        / power_plasma_W
+                    )
+
+                    # Generalised Manley equation (Brandenburg et al. 2023 eq. 13)
+                    V_min_avg_V = (V_min_pos_V + V_min_neg_V) / 2
+                    power_manley_W = (
+                        4 * ac_freq_Hz * beta_avg * (C_diel_F - C_cell_avg_F)
+                        * V_min_avg_V * (V_amp_V - V_min_avg_V)
+                    )
+
                     if np.isfinite(C_cell_avg_F):
                         # Calculate plasma current
                         subset['current_plasma_A'] = (
@@ -1038,10 +1051,25 @@ def _(
                         )
 
                         # Find peaks in the plasma current
+                        # (with the Pearson 4100 the pulses are 170-700 ns wide
+                        # and >= 270 ns apart, so these two limits do not bind)
                         peak_distance = int(50e-9 / t_per_row)
                         peak_width = int(15e-9 / t_per_row)
                         I = subset['current_plasma_A'].to_numpy()
                         tt = subset[t].to_numpy()
+
+                        # Band-limited RMS of the plasma current: a spectral
+                        # pulse metric after De Meyer et al. 2024, computed on
+                        # the PB19 plasma current (Parseval, one-sided rfft)
+                        spectrum = np.fft.rfft(I)
+                        freqs = np.fft.rfftfreq(len(I), t_per_row)
+                        in_band = (
+                            (freqs >= pulse_band_Hz[0]) &
+                            (freqs <= pulse_band_Hz[1])
+                        )
+                        pulse_band_rms_A = np.sqrt(
+                            2 * np.sum(np.abs(spectrum[in_band])**2)
+                        ) / len(I)
 
                         # Find positive peaks
                         p_pos, props_pos = find_peaks(
@@ -1052,9 +1080,13 @@ def _(
                             prominence=discharge_threshold_A
                         )
 
-                        max_width = int(300e-9 / t_per_row)  # tune once
-                        valid_pos = props_pos['widths'] < max_width
-                        p_pos = p_pos[valid_pos]
+                        # Reject slow current humps (10-280 us in the test data,
+                        # on the scale of the half-period) wider than
+                        # max_pulse_width_s; real pulses are 0.1-1 us wide
+                        max_width = max_pulse_width_s / t_per_row
+                        too_wide_pos = props_pos['widths'] > max_width
+                        width_pos = props_pos['widths'][~too_wide_pos]
+                        p_pos = p_pos[~too_wide_pos]
 
                         # Integrate positive peaks
                         Qpos, Qpos_each = integrate_microdischarge_charge(
@@ -1072,8 +1104,20 @@ def _(
                             prominence=discharge_threshold_A
                         )
 
-                        valid_neg = props_neg['widths'] < max_width
-                        p_neg = p_neg[valid_neg]
+                        too_wide_neg = props_neg['widths'] > max_width
+                        width_neg = props_neg['widths'][~too_wide_neg]
+                        p_neg = p_neg[~too_wide_neg]
+
+                        # Pulse width check: median width of the accepted
+                        # pulses and number rejected as too wide
+                        widths_all = np.concatenate([width_pos, width_neg])
+                        pulse_width_median_s = (
+                            np.median(widths_all) * t_per_row
+                            if len(widths_all) else np.nan
+                        )
+                        n_pulses_too_wide = int(
+                            too_wide_pos.sum() + too_wide_neg.sum()
+                        )
 
                         # Integrate negative peaks (detect on inverted signal, integrate magnitude)
                         Qneg, Qneg_each = integrate_microdischarge_charge(
@@ -1100,6 +1144,9 @@ def _(
                         Q_frac_in_udisch = Q_total / Q_delta_dis_total_C
                     else:
                         current_rms_plasma_A = np.nan
+                        pulse_band_rms_A = np.nan
+                        pulse_width_median_s = np.nan
+                        n_pulses_too_wide = np.nan
                         num_udisch = num_udisch_corr = np.nan
                         Q_total = Q_micro_avg_C = Q_frac_in_udisch = np.nan
 
@@ -1178,7 +1225,14 @@ def _(
                             'n_off_points_pos': pos['n_off_points'],
                             'n_on_points_neg': neg['n_on_points'],
                             'n_on_points_pos': pos['n_on_points'],
-                            'calculated_shift_s': calculated_shift_s
+                            'calculated_shift_s': calculated_shift_s,
+                            'power_quadrature_W': power_quadrature_W,
+                            'power_ratio_UbQdis': power_ratio_UbQdis,
+                            'power_manley_W': power_manley_W,
+                            'current_noise_sigma_A': noise_sigma_A,
+                            'pulse_band_rms_A': pulse_band_rms_A,
+                            'pulse_width_median_s': pulse_width_median_s,
+                            'n_pulses_too_wide': n_pulses_too_wide
                         }
                     )
                 except Exception as e:
@@ -1203,9 +1257,9 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 2: `remove_outliers`
+    ## Step 2 · `remove_outliers`: remove gross failures
 
-    Define remove_outliers function that removes outliers from the generated DataFrame in the previous step
+    Removes cycles where a core quantity deviates more than 20% from its capture's median (calculation glitch), or where the power deviates more than 10% from the run's median (off the power setpoint). It is not a statistical test: cycles differ by only ~1%, so a statistical test would remove good data. [Details](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/03-calculation-steps.md#c1-remove-gross-failures).
     """)
     return
 
@@ -1284,9 +1338,14 @@ def _(np):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 3: `lissajous_generation`
+    ## Step 3 · `lissajous_figure_generation`: the check figure
 
-    Define lissajous_generation function that generates lissajous figures for the given DataFrame
+    `lissajous_figure.png` has three panels:
+    1. the average Q–V loop with the fitted lines;
+    2. |dQ/dV| over time;
+    3. dQ/dV against voltage, with the mean capacitances as horizontal lines and the ignition voltages as vertical lines.
+
+    Look at it for every run: do the lines follow the branches, and do the ignition lines sit at the corners?
     """)
     return
 
@@ -1428,9 +1487,15 @@ def _(np, plt, savgol_filter):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 4: `profile_calculation`
+    ## Step 4 · `profile_calculation`: time traces
 
-    Define 'current_voltage_profile' function that generates the current/voltage/charge/dQ_dV profile for the given DataFrame by grouping the data by 'filename', selecting every 'row_skip'th row, creating a column 'wave_index' that contains the index of the current wavelength. Create a column 'current_sign' that indecates if the current is positive or negative.
+    Keeps every 100th sample and adds:
+    - the plasma current (Peeters & Butterworth 2019 eq. 3);
+    - the true displacement current;
+    - the charge carried by the plasma (Peeters & van de Sanden 2015 eq. A12);
+    - the gap voltage (P15 eq. 3), using the median `alpha`, `beta` and `C_cell` of the capture's valid cycles.
+
+    `current_sign` is a label per half-period, not the measured sign. [Column list](https://github.com/sbossier/plasmacatdesign/blob/main/docs/electrical/04-output-columns.md#profile_dataparquet-time-traces-every-100th-sample).
     """)
     return
 
@@ -1463,9 +1528,14 @@ def _(pd):
                     print(f"⚠️ Skipping file without results: {group_name}")
                     continue
 
-                alpha = res_row['alpha_avg'].iat[0]
-                beta = res_row['beta_avg'].iat[0]
-                C_cell = res_row['C_cell_avg_F'].iat[0]
+                # Per-file values: median over the cycles that pass the
+                # validity gate (all cycles if none pass)
+                valid = res_row[res_row['parallelogram_valid'] == 1]
+                if valid.empty:
+                    valid = res_row
+                alpha = valid['alpha_avg'].median()
+                beta = valid['beta_avg'].median()
+                C_cell = valid['C_cell_avg_F'].median()
 
                 # Calculate plasma current
                 subset['current_plasma_A'] = (1 / (1 - C_cell / C_diel)) * (
@@ -1529,7 +1599,14 @@ def _(pd):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Step 5: Run the functions sequentially
+    ## Step 5 · Run
+
+    For every folder under `top_folder` that contains `lissajous_data.parquet`:
+    - old result files in that folder are deleted;
+    - steps 1–4 run;
+    - the outputs are written next to the input.
+
+    In the browser this starts with the **Run calculations** button. With `uv run` it starts directly.
     """)
     return
 

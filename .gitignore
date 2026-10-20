@@ -126,3 +126,6 @@ Desktop.ini
 test-files/
 file/
 literature/
+
+# Example data: kept local until the upcoming publication
+example-data/
